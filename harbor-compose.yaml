@@ -168,7 +168,6 @@ services:
         - traefik.constraint-label=traefik-public
         - traefik.http.routers.harbor-http.rule=Host(`${HARBOR_HOST}`)
         - traefik.http.routers.harbor-http.entrypoints=http
-        #- traefik.http.routers.harbor-http.middlewares=harbor-redirect-web-secure
         - traefik.http.routers.harbor-https.rule=Host(`${HARBOR_HOST}`)
         - traefik.http.routers.harbor-https.entrypoints=https
         - traefik.http.routers.harbor-https.tls=true

@@ -5,6 +5,8 @@ export STACK="harbor"
 # change-me
 export HARBOR_HOST="harbor.myfqdn.domain"
 export HARBOR_ADMIN_PASSWORD="Harbor12345"
+export NFS_HOST="10.10.1.13"
+export NFS_SHARE=":/mnt/tank/data/dkr/sys30/harbor"
 
 # default settings (if changing the postgres pw and user, also adjust the supplementary/clair/config.yaml on the line nr. 5)
 export REGISTRY_HTTP_SECRET="harbor"
