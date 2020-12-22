@@ -1,0 +1,269 @@
+version: '3.7'
+
+services:
+  
+  registry:
+    image: docker.io/bitnami/harbor-registry:${HARBOR_TAG}
+    environment:
+      - REGISTRY_HTTP_SECRET=${REGISTRY_HTTP_SECRET}
+    configs:
+      - source: registry-config
+        target: /etc/registry/config.yml
+        mode: 0444
+      - source: registry-passwd
+        target: /etc/registry/passwd
+        mode: 0444
+      - source: registry-cert
+        target: /etc/registry/root.crt
+        mode: 0444
+    volumes:
+      - registry_data:/storage
+    networks:
+      - internal
+  
+  registryctl:
+    image: goharbor/harbor-registryctl:v2.0.2
+    # changed to original harbor-registryctl due to a bug in bitnamy image
+    #image: docker.io/bitnami/harbor-registryctl:${HARBOR_TAG}
+    environment:
+      - CORE_SECRET=${CORE_SECRET}
+      - JOBSERVICE_SECRET=${JOBSERVICE_SECRET}
+      - REGISTRY_HTTP_SECRET=${REGISTRY_HTTP_SECRET}
+    configs:
+      - source: registry-config
+        target: /etc/registry/config.yml
+        mode: 0444
+      - source: registryctl-config
+        target: /etc/registryctl/config.yml
+        mode: 0444    
+    volumes:
+      - registry_data:/storage
+    networks:
+      - internal
+  
+  postgresql:
+    image: docker.io/bitnami/postgresql:${PSQL_TAG}
+    environment:
+      - POSTGRESQL_PASSWORD=${POSTGRESQL_PASSWORD}
+      - POSTGRESQL_DATABASE=${POSTGRESQL_DATABASE}
+    volumes:
+      - postgresql_data:/bitnami/postgresql
+    networks:
+      - internal
+
+  clair-adapter:
+    image: docker.io/bitnami/harbor-adapter-clair:${HARBOR_TAG}
+    environment:
+      - SCANNER_CLAIR_URL=http://clair:6060
+      - SCANNER_STORE_REDIS_URL=redis://redis:6379
+    volumes:
+      - clair_data:/bitnami
+    networks:
+      - internal
+
+  clair:
+    image: docker.io/bitnami/harbor-clair:${HARBOR_TAG}
+    volumes:
+      - clair_data:/bitnami
+    configs:
+      - source: clair-config
+        target: /etc/clair/config.yaml
+        mode: 0444
+    networks:
+      - internal
+  
+  core:
+    image: docker.io/bitnami/harbor-core:${HARBOR_TAG}
+    depends_on:
+      - registry
+      - chartmuseum
+    environment:
+      - CORE_KEY=${CORE_KEY}
+      - _REDIS_URL=redis:6379,100,
+      - SYNC_REGISTRY=false
+      - CHART_CACHE_DRIVER=redis
+      - _REDIS_URL_REG=redis://redis:6379/1
+      - PORT=8080
+      - LOG_LEVEL=info
+      - EXT_ENDPOINT=https://${HARBOR_HOST}
+      - DATABASE_TYPE=postgresql
+      - REGISTRY_CONTROLLER_URL=http://registryctl:8080
+      - POSTGRESQL_HOST=postgresql
+      - POSTGRESQL_PORT=5432
+      - POSTGRESQL_DATABASE=${POSTGRESQL_DATABASE}
+      - POSTGRESQL_USERNAME=${POSTGRESQL_USERNAME}
+      - POSTGRESQL_PASSWORD=${POSTGRESQL_PASSWORD}
+      - POSTGRESQL_SSLMODE=disable
+      - REGISTRY_URL=http://registry:5000
+      - TOKEN_SERVICE_URL=http://core:8080/service/token
+      - HARBOR_ADMIN_PASSWORD=${HARBOR_ADMIN_PASSWORD}
+      - CORE_SECRET=${CORE_SECRET}
+      - JOBSERVICE_SECRET=${JOBSERVICE_SECRET}
+      - ADMIRAL_URL=
+      - WITH_NOTARY=False
+      - WITH_CLAIR=True
+      - WITH_CHARTMUSEUM=True
+      - CHART_REPOSITORY_URL=http://chartmuseum:8080
+      - CORE_URL=http://core:8080
+      - JOBSERVICE_URL=http://jobservice:8080
+      - REGISTRY_STORAGE_PROVIDER_NAME=filesystem
+      - REGISTRY_CREDENTIAL_USERNAME=harbor_registry_user
+      - REGISTRY_CREDENTIAL_PASSWORD=harbor_registry_password
+      - READ_ONLY=false
+      - RELOAD_KEY=
+    configs:
+      - source: core-config
+        target: /etc/core/app.conf
+        mode: 0444
+      - source: core-key
+        target: /etc/core/private_key.pem
+        mode: 0444  
+    volumes:
+      - core_data:/data
+    networks:
+      - internal
+  
+  portal:
+    image: docker.io/bitnami/harbor-portal:${HARBOR_TAG}
+    depends_on:
+      - core
+    networks:
+      - internal
+  
+  jobservice:
+    image: docker.io/bitnami/harbor-jobservice:${HARBOR_TAG}
+    depends_on:
+      - redis
+      - core
+    environment:
+      - CORE_SECRET=${CORE_SECRET}
+      - JOBSERVICE_SECRET=${JOBSERVICE_SECRET}
+      - CORE_URL=http://core:8080
+      - REGISTRY_CONTROLLER_URL=http://registryctl:8080
+      - REGISTRY_CREDENTIAL_USERNAME=harbor_registry_user
+      - REGISTRY_CREDENTIAL_PASSWORD=harbor_registry_password
+    configs:
+      - source: jobservice-config
+        target: /etc/jobservice/config.yml
+        mode: 0444
+    volumes:
+      - jobservice_data:/var/log/jobs
+    networks:
+      - internal
+  
+  redis:
+    image: docker.io/bitnami/redis:${REDIS_TAG}
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+    networks:
+      - internal
+  
+  nginx:
+    image: docker.io/bitnami/nginx:${NGINX_TAG}
+    deploy:
+      labels:
+        - traefik.enable=true
+        - traefik.http.middlewares.harbor-redirect-web-secure.redirectscheme.scheme=https
+        - traefik.docker.network=traefik-public
+        - traefik.constraint-label=traefik-public
+        - traefik.http.routers.harbor-http.rule=Host(`${HARBOR_HOST}`)
+        - traefik.http.routers.harbor-http.entrypoints=http
+        #- traefik.http.routers.harbor-http.middlewares=harbor-redirect-web-secure
+        - traefik.http.routers.harbor-https.rule=Host(`${HARBOR_HOST}`)
+        - traefik.http.routers.harbor-https.entrypoints=https
+        - traefik.http.routers.harbor-https.tls=true
+        - traefik.http.routers.harbor-https.tls.certresolver=le
+        - traefik.http.services.harbor.loadbalancer.server.port=8080
+        - traefik.http.services.harbor.loadbalancer.passhostheader=true
+    configs:
+      - source: proxy-config
+        target: /opt/bitnami/nginx/conf/nginx.conf
+        mode: 0444
+    depends_on:
+      - postgresql
+      - registry
+      - core
+      - portal
+    networks:
+      - internal
+      - traefik-public
+  
+  chartmuseum:
+    image: docker.io/bitnami/chartmuseum:${CHARTMUSEUM_TAG}
+    environment:
+      - CACHE=redis
+      - CACHE_REDIS_ADDR=redis:6379
+      - CACHE_REDIS_DB=1
+      - DEPTH=1
+      - PORT=8080
+      - STORAGE=local
+      - STORAGE_LOCAL_ROOTDIR=/bitnami/data
+      - ALLOW_OVERWRITE=true
+      - INDEX_LIMIT=0
+    volumes:
+      - chartmuseum_data:/bitnami/data
+    networks:
+      - internal
+
+configs:
+  clair-config:
+    file: ./supplementary/clair/config.yaml
+  core-config:
+    file: ./supplementary/core/app.conf
+  core-key:
+    file: ./supplementary/core/private_key.pem
+  jobservice-config:
+    file: ./supplementary/jobservice/config.yml
+  proxy-config:
+    file: ./supplementary/proxy/nginx.conf
+  registry-config:
+    file: ./supplementary/registry/config.yml
+  registry-passwd:
+    file: ./supplementary/registry/passwd
+  registry-cert:
+    file: ./supplementary/registry/root.crt
+  registryctl-config:
+    file: ./supplementary/registryctl/config.yml
+
+networks:
+  traefik-public:
+    external: true
+  internal:
+
+volumes:
+  registry_data:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=${NFS_HOST},rw,local_lock=all,soft
+      device: "${NFS_SHARE}/registry_data"
+  core_data:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=${NFS_HOST},rw,local_lock=all,soft
+      device: "${NFS_SHARE}/core_data"
+  jobservice_data:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=${NFS_HOST},rw,local_lock=all,soft
+      device: "${NFS_SHARE}/jobservice_data"
+  postgresql_data:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=${NFS_HOST},rw,local_lock=all,soft
+      device: "${NFS_SHARE}/postgresql_data"
+  chartmuseum_data:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=${NFS_HOST},rw,local_lock=all,soft
+      device: "${NFS_SHARE}/chartmuseum_data"
+  clair_data:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=${NFS_HOST},rw,local_lock=all,soft
+      device: "${NFS_SHARE}/clair_data"
