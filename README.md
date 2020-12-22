@@ -11,15 +11,17 @@ Download the "harbor-compose.yaml" file as well as the files located in "supplem
 
 ### Installation
 Adjust the variables located in "start-stop.sh" script according to your requirements - the mandatory vars are:
-- HARBOR_HOST
-- HARBOR_ADMIN_PASSWORD
+
+- ```HARBOR_HOST```
+- ```HARBOR_ADMIN_PASSWORD```
+
 Make the scipt "start-stop.sh" executable:
-$ chmod u+x start-stop.sh
+```$ chmod u+x start-stop.sh```
 
 ### Startup
 Launch the stack using the script:
-$ ./start-stop.sh start
+```$ ./start-stop.sh start```
 
 Monitor the stack using following commands (depending on situation):
-$ docker stack ps harbor
-$ docker service ls -f name=harbor
+```$ docker stack ps harbor```
+```$ docker service ls -f name=harbor```
